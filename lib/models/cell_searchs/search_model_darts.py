@@ -35,7 +35,8 @@ class TinyNetworkDarts(nn.Module):
                                   nn.BatchNorm2d(C))
 
         layer_channels   = [C    ] * N + [C*2 ] + [C*2  ] * N + [C*4 ] + [C*4  ] * N
-        layer_reductions = [False] * N + [True] + [False] * N + [True] + [False] * N
+        # layer_reductions = [False] * N + [True] + [False] * N + [True] + [False] * N
+        layer_reductions = [False] * N + [True] + [False] * N + [True] + [False] * N + [True] + [False] * N
 
         C_prev, num_edge, edge2index = C, None, None
         self.cells = nn.ModuleList()

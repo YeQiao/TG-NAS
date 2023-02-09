@@ -17,6 +17,7 @@ from log_utils import time_string
 from models import get_cell_based_tiny_net, get_search_spaces  # , nas_super_nets
 from nas_201_api import NASBench201API as API
 from pdb import set_trace as bp
+import torchsummary
 
 
 INF = 1000  # used to mark prunned operators
@@ -64,7 +65,7 @@ def round_to(number, precision, eps=1e-8):
         return sign * round(number*10**(-power), precision) * 10**(power)
 
 
-def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loader, lrc_model, search_space, precision=10, prune_number=1):
+def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loader, lrc_model, search_space, precision=10, prune_number=1, xshape = (1, 3, 32, 32)):
     # arch_parameters now has three dim: cell_type, edge, op
     network_origin = get_cell_based_tiny_net(model_config).cuda().train()
     init_model(network_origin, xargs.init)
@@ -76,10 +77,17 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
     network_origin.set_alphas(arch_parameters)
     network_thin_origin.set_alphas(arch_parameters)
 
+    # Original flops
+    network_original_flops, _ = get_model_infos(network_origin, xshape)
+
+    print('initial alpha for network_origin')
+    print(network_origin.show_alphas())
+
     alpha_active = [(nn.functional.softmax(alpha, 1) > 0.01).float() for alpha in arch_parameters]
     prune_number = min(prune_number, alpha_active[0][0].sum()-1)  # adjust prune_number based on current remaining ops on each edge
     ntk_all = []  # (ntk, (edge_idx, op_idx))
     regions_all = []  # (regions, (edge_idx, op_idx))
+    flops_all = []  # (flops, (edge_idx, op_idx))
     choice2regions = {}  # (edge_idx, op_idx): regions
     pbar = tqdm(total=int(sum(alpha.sum() for alpha in alpha_active)), position=0, leave=True)
     for idx_ct in range(len(arch_parameters)):
@@ -98,8 +106,13 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
                     # ##### get ntk (score) ########
                     network = get_cell_based_tiny_net(model_config).cuda().train()
                     network.set_alphas(_arch_param)
+
+                    print('initial alpha for network')
+                    print(network.show_alphas())
+
                     ntk_delta = []
                     repeat = xargs.repeat
+                    flops_delta = []
                     for _ in range(repeat):
                         # random reinit
                         init_model(network_origin, xargs.init+"_fanout" if xargs.init.startswith('kaiming') else xargs.init)  # for backward
@@ -107,11 +120,24 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
                         for param_ori, param in zip(network_origin.parameters(), network.parameters()):
                             param.data.copy_(param_ori.data)
                         network.set_alphas(_arch_param)
+
+                        print('new alpha for network')
+                        print(network.show_alphas())
+
                         # NTK cond TODO #########
                         ntk_origin, ntk = get_ntk_n(loader, [network_origin, network], recalbn=0, train_mode=True, num_batch=1)
                         # ####################
                         ntk_delta.append(round((ntk_origin - ntk) / ntk_origin, precision))  # higher the more likely to be prunned
+
+                        # FLOPS count
+                        network_flops, _ = get_model_infos(network, xshape)
+                        # lower the more likely to be prunned
+                        flops_delta.append(round((network_original_flops - network_flops) / network_original_flops, precision))
+
                     ntk_all.append([np.mean(ntk_delta), (idx_ct, idx_edge, idx_op)])  # change of ntk
+
+                    flops_all.append([np.mean(flops_delta), (idx_ct, idx_edge, idx_op)])  # change of flops
+
                     network.zero_grad()
                     network_origin.zero_grad()
                     #############################
@@ -144,6 +170,7 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
                     del network_thin
                     del network_thin_origin
                     pbar.update(1)
+
     ntk_all = sorted(ntk_all, key=lambda tup: round_to(tup[0], precision), reverse=True)  # descending: we want to prune op to decrease ntk, i.e. to make ntk_origin > ntk
     # print("NTK conds:", ntk_all)
     rankings = {}  # dict of (cell_idx, edge_idx, op_idx): [ntk_rank, regions_rank]
@@ -156,6 +183,7 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
                 rankings[data[1]] = [ rankings[ntk_all[idx-1][1]][0] ]
             else:
                 rankings[data[1]] = [ rankings[ntk_all[idx-1][1]][0] + 1 ]
+
     regions_all = sorted(regions_all, key=lambda tup: round_to(tup[0], precision), reverse=False)  # ascending: we want to prune op to increase lr, i.e. to make lr < lr_2
     # print("#Regions:", regions_all)
     for idx, data in enumerate(regions_all):
@@ -167,11 +195,25 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
                 rankings[data[1]].append(rankings[regions_all[idx-1][1]][1])
             else:
                 rankings[data[1]].append(rankings[regions_all[idx-1][1]][1]+1)
-    rankings_list = [[k, v] for k, v in rankings.items()]  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank]
+        
+    flops_all = sorted(flops_all, key=lambda tup: round_to(tup[0], precision), reverse=True)  # descending: we want to prune op to decrease flops
+    for idx, data in enumerate(flops_all):
+        if idx == 0:
+            rankings[data[1]].append(idx)
+        else:
+            if data[0] == flops_all[idx-1][0]:
+                # same flops as previous
+                rankings[data[1]].append(rankings[flops_all[idx-1][1]][2])
+            else:
+                rankings[data[1]].append(rankings[flops_all[idx-1][1]][2]+1)
+
+    rankings_list = [[k, v] for k, v in rankings.items()]  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
     # ascending by sum of two rankings
-    rankings_sum = sorted(rankings_list, key=lambda tup: sum(tup[1]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank]
+    # rankings_sum = sorted(rankings_list, key=lambda tup: sum(tup[1]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
+    rankings_sum = sorted(rankings_list, key=lambda tup: np.average(tup[1], weights = [0.2, 0.2, 0.6]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
+    
     edge2choice = {}  # (cell_idx, edge_idx): list of (cell_idx, edge_idx, op_idx) of length prune_number
-    for (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank] in rankings_sum:
+    for (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank] in rankings_sum:
         if (cell_idx, edge_idx) not in edge2choice:
             edge2choice[(cell_idx, edge_idx)] = [(cell_idx, edge_idx, op_idx)]
         elif len(edge2choice[(cell_idx, edge_idx)]) < prune_number:
@@ -386,6 +428,20 @@ def main(xargs):
                                    'steps': 4,
                                    'multiplier': 4,
                                   })
+    ## my test space                              
+    elif xargs.search_space_name == 'Ye':
+        model_config = edict({'name': 'DARTS-V1',
+                              'C': 3, 'N': 1, 'depth': -1, 'use_stem': True,
+                              'max_nodes': xargs.max_nodes, 'num_classes': class_num,
+                              'space': search_space,
+                              'affine': True, 'track_running_stats': bool(xargs.track_running_stats),
+                             })
+        model_config_thin = edict({'name': 'DARTS-V1',
+                                   'C': 1, 'N': 1, 'depth': 1, 'use_stem': False,
+                                   'max_nodes': xargs.max_nodes, 'num_classes': class_num,
+                                   'space': search_space,
+                                   'affine': True, 'track_running_stats': bool(xargs.track_running_stats),
+                                  })
     network = get_cell_based_tiny_net(model_config)
     logger.log('model-config : {:}'.format(model_config))
     arch_parameters = [alpha.detach().clone() for alpha in network.get_alphas()]
@@ -399,7 +455,7 @@ def main(xargs):
     flop, param = get_model_infos(network, xshape)
     logger.log('FLOP = {:.2f} M, Params = {:.2f} MB'.format(flop, param))
     logger.log('search-space [{:} ops] : {:}'.format(len(search_space), search_space))
-    if xargs.arch_nas_dataset is None or xargs.search_space_name == 'darts':
+    if xargs.arch_nas_dataset is None or xargs.search_space_name == 'darts'or xargs.search_space_name == 'Ye':
         api = None
     else:
         api = API(xargs.arch_nas_dataset)
@@ -426,12 +482,15 @@ def main(xargs):
 
         arch_parameters, op_pruned = prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, train_loader, lrc_model, search_space,
                                                      precision=xargs.precision,
-                                                     prune_number=xargs.prune_number
+                                                     prune_number=xargs.prune_number,
+                                                     xshape = xshape
                                                      )
         # rebuild supernet
         network = get_cell_based_tiny_net(model_config)
         network = network.cuda()
         network.set_alphas(arch_parameters)
+        
+        torchsummary(network, (3, 32, 32))
 
         arch_parameters_history.append([alpha.detach().clone() for alpha in arch_parameters])
         arch_parameters_history_npy.append([alpha.detach().clone().cpu().numpy() for alpha in arch_parameters])

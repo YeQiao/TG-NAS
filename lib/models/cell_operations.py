@@ -18,10 +18,12 @@ OPS = {
 }
 
 NAS_BENCH_201 = ['none', 'skip_connect', 'nor_conv_1x1', 'nor_conv_3x3', 'avg_pool_3x3']
+# NAS_BENCH_201 = ['none', 'nor_conv_1x1', 'nor_conv_3x3', 'avg_pool_3x3']
 DARTS_SPACE   = ['none', 'skip_connect', 'sep_conv_3x3', 'sep_conv_5x5', 'dil_conv_3x3', 'dil_conv_5x5', 'avg_pool_3x3', 'max_pool_3x3']
-
+Ye_SPACE_TEST = ['none', 'nor_conv_1x1', 'nor_conv_3x3', 'avg_pool_3x3']
 SearchSpaceNames = {'nas-bench-201': NAS_BENCH_201,
-                    'darts'        : DARTS_SPACE}
+                    'darts'        : DARTS_SPACE,
+                    'Ye'        : Ye_SPACE_TEST}
 
 
 class ReLUConvBN(nn.Module):
