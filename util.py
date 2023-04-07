@@ -848,3 +848,11 @@ def plot_hist_conv_linear(model,save_fig=False,plt_show=True,model_name=None):
             plt.savefig(figure_name, dpi=150, bbox_inches='tight')
         if plt_show == True:
             plt.show()
+
+def pytorch2onnx(net_path, net_name, size):
+    net = torch.load(net_path, map_location=torch.device('cpu'))
+
+    dummy_input = torch.randn(1, *size)
+
+    optName = str(net_name)+'.onnx'
+    torch.onnx.export(net, dummy_input, optName, verbose=True)

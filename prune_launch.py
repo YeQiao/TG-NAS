@@ -19,6 +19,7 @@ parser.add_argument('--space', default='nas-bench-201', type=str, choices=['nas-
 parser.add_argument('--dataset', default='cifar100', type=str, choices=['cifar10', 'cifar100', 'ImageNet16-120', 'imagenet-1k'], help='Choose between cifar10/100/ImageNet16-120/imagenet-1k')
 parser.add_argument('--seed', default=0, type=int, help='manual seed')
 parser.add_argument('--max_node', default=4, type=int, help='The maximum number of nodes.')
+parser.add_argument('--flops_weight', type=float, default=0, help='weight of flops in the ranking system, range from 0 to 1')
 args = parser.parse_args()
 
 
@@ -69,6 +70,7 @@ core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas.
 --repeat 3 \
 --batch_size {batch_size} \
 --prune_number {prune_number} \
+--flops_weight {flops_weight} \
 ".format(
     gpuid=args.gpu,
     save_dir="./output/prune-{space}/{dataset}".format(space=space, dataset=args.dataset),
@@ -83,7 +85,8 @@ core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas.
     precision=precision,
     init=init,
     batch_size=batch_size,
-    prune_number=prune_number
+    prune_number=prune_number,
+    flops_weight=args.flops_weight,
 )
 
 os.system(core_cmd)

@@ -18,6 +18,8 @@ from models import get_cell_based_tiny_net, get_search_spaces  # , nas_super_net
 from nas_201_api import NASBench201API as API
 from pdb import set_trace as bp
 import torchsummary
+from util import *
+from util import pytorch2onnx
 
 
 INF = 1000  # used to mark prunned operators
@@ -80,8 +82,8 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
     # Original flops
     network_original_flops, _ = get_model_infos(network_origin, xshape)
 
-    print('initial alpha for network_origin')
-    print(network_origin.show_alphas())
+    # print('initial alpha for network_origin')
+    # print(network_origin.show_alphas())
 
     alpha_active = [(nn.functional.softmax(alpha, 1) > 0.01).float() for alpha in arch_parameters]
     prune_number = min(prune_number, alpha_active[0][0].sum()-1)  # adjust prune_number based on current remaining ops on each edge
@@ -107,8 +109,8 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
                     network = get_cell_based_tiny_net(model_config).cuda().train()
                     network.set_alphas(_arch_param)
 
-                    print('initial alpha for network')
-                    print(network.show_alphas())
+                    # print('initial alpha for network')
+                    # print(network.show_alphas())
 
                     ntk_delta = []
                     repeat = xargs.repeat
@@ -121,8 +123,8 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
                             param.data.copy_(param_ori.data)
                         network.set_alphas(_arch_param)
 
-                        print('new alpha for network')
-                        print(network.show_alphas())
+                        # print('new alpha for network')
+                        # print(network.show_alphas())
 
                         # NTK cond TODO #########
                         ntk_origin, ntk = get_ntk_n(loader, [network_origin, network], recalbn=0, train_mode=True, num_batch=1)
@@ -210,7 +212,7 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
     rankings_list = [[k, v] for k, v in rankings.items()]  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
     # ascending by sum of two rankings
     # rankings_sum = sorted(rankings_list, key=lambda tup: sum(tup[1]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
-    rankings_sum = sorted(rankings_list, key=lambda tup: np.average(tup[1], weights = [0.2, 0.2, 0.6]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
+    rankings_sum = sorted(rankings_list, key=lambda tup: np.average(tup[1], weights = [(1-xargs.flops_weight)/2, (1-xargs.flops_weight)/2, xargs.flops_weight]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
     
     edge2choice = {}  # (cell_idx, edge_idx): list of (cell_idx, edge_idx, op_idx) of length prune_number
     for (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank] in rankings_sum:
@@ -395,6 +397,8 @@ def main(xargs):
     logger.log('||||||| {:10s} ||||||| Train-Loader-Num={:}, batch size={:}'.format(xargs.dataset, len(train_loader), config.batch_size))
     logger.log('||||||| {:10s} ||||||| Config={:}'.format(xargs.dataset, config))
 
+    logger.log('||||||| {:10s} ||||||| {:}'.format("rank weights (ntk, lr, flops)", [(1-xargs.flops_weight)/2, (1-xargs.flops_weight)/2, xargs.flops_weight]))
+
     search_space = get_search_spaces('cell', xargs.search_space_name)
     if xargs.search_space_name == 'nas-bench-201':
         model_config = edict({'name': 'DARTS-V1',
@@ -490,7 +494,7 @@ def main(xargs):
         network = network.cuda()
         network.set_alphas(arch_parameters)
         
-        torchsummary(network, (3, 32, 32))
+        # torchsummary(network, (3, 32, 32))
 
         arch_parameters_history.append([alpha.detach().clone() for alpha in arch_parameters])
         arch_parameters_history_npy.append([alpha.detach().clone().cpu().numpy() for alpha in arch_parameters])
@@ -522,7 +526,10 @@ def main(xargs):
     if api is not None:
         logger.log('{:}'.format(api.query_by_arch(genotypes['arch'][epoch])))
 
+    logger.log("printed final model info: \n", network)
     logger.close()
+    torch.save(network, config.save_dir + 'saved_model.pkl')
+    pytorch2onnx(config.save_dir + 'saved_model.pkl', config.save_dir + 'saved_onnx_model.pkl', [3,32,32])
 
 
 if __name__ == '__main__':
@@ -543,6 +550,7 @@ if __name__ == '__main__':
     parser.add_argument('--timestamp', default='none', type=str, help='timestamp for logging naming')
     parser.add_argument('--init', default='kaiming_uniform', help='use gaussian init')
     parser.add_argument('--super_type', type=str, default='basic',  help='type of supernet: basic or nasnet-super')
+    parser.add_argument('--flops_weight', type=float, default=0, help='weight of flops in the ranking system, range from 0 to 1')
     args = parser.parse_args()
     if args.rand_seed is None or args.rand_seed < 0:
         args.rand_seed = random.randint(1, 100000)

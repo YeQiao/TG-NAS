@@ -224,7 +224,10 @@ def main(args):
 
     criterion = nn.CrossEntropyLoss().to(device)
           
-    optimizer = optim.Adam(network.parameters(), lr=args.lr)
+    # optimizer = optim.Adam(network.parameters(), lr=args.lr)
+    optimizer = torch.optim.SGD(network.parameters(), args.lr,
+                            momentum=args.momentum,
+                            weight_decay=args.weight_decay)
     # scheduler = ReduceLROnPlateau(optimizer, 'min')
     scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
     epoch_num = args.epochs
