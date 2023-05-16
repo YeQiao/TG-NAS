@@ -217,7 +217,7 @@ class Linear_Region_Collector:
             except Exception:
                 del self.loader
                 self.loader = iter(self.train_loader)
-                inputs, targets = self.loader.next()
+                inputs, targets = next(self.loader)
             for model, LRCount in zip(self.models, self.LRCounts):
                 self.forward(model, LRCount, inputs)
         return [LRCount.getLinearReginCount() for LRCount in self.LRCounts]

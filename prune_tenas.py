@@ -17,13 +17,74 @@ from log_utils import time_string
 from models import get_cell_based_tiny_net, get_search_spaces  # , nas_super_nets
 from nas_201_api import NASBench201API as API
 from pdb import set_trace as bp
-import torchsummary
+from torchsummary import summary
 from util import *
 from util import pytorch2onnx
 
 
 INF = 1000  # used to mark prunned operators
 
+ # LUT for latency modeling
+latency_table_nasbench = {
+    'none' : 0, 
+    'skip_connect' : 1.43, 
+    'nor_conv_1x1' : 23.49, 
+    'nor_conv_3x3' : 80.26,
+    'avg_pool_3x3' : 24.02
+}
+
+latency_table_darts = {
+    'none' : 0, 
+    'skip_connect' : 1.5, 
+    'sep_conv_3x3' : 80, 
+    'sep_conv_5x5' : 170, 
+    'dil_conv_3x3' : 40, 
+    'dil_conv_5x5' : 85, 
+    'avg_pool_3x3' : 24, 
+    'max_pool_3x3' : 24
+}
+
+# def get_estimated_mcu_latency(network):
+#     latency_list = np.array(list(latency_table_nasbench.values()))
+
+# # [str((alpha > -INF).int()) for alpha in network.get_alphas()]
+#     # str((alpha > -INF).int()) 
+    
+#     latency_sum = 0
+#     print('network.get_alphas(): ', network.get_alphas())
+#     for alpha in network.get_alphas():
+#         masks = (alpha > -INF).int()
+#         masks = masks.cpu().detach().numpy()
+#         print('mask: ', masks)
+#         for mask in masks:
+#             # lentency_sub = latency_list(mask)
+#             lentency_sub = np.where(mask, latency_list, 0)
+#             print('masked_latency array: ', lentency_sub)
+#             latency_sum += np.sum(lentency_sub)
+#         import pdb; pdb.set_trace()
+
+#     return latency_sum
+
+def get_estimated_mcu_latency(network, xargs):
+    if xargs.search_space_name == 'darts':
+        latency_list = np.array(list(latency_table_darts.values()))
+    else:
+        latency_list = np.array(list(latency_table_nasbench.values()))
+         
+    latency_sum = 0
+    # print('network.get_alphas(): ', network.get_alphas())
+    for idx_ct, alpha in enumerate(network.get_alphas()):
+        masks = (alpha > -INF).int()
+        masks = masks.cpu().detach().numpy()
+        # print('mask for normal cell: ', masks) if idx_ct == 0 else print('mask for reduction cell: ', masks)
+        for mask in masks:
+            # lentency_sub = latency_list(mask)
+            lentency_sub = np.where(mask, latency_list, 0)
+            # print('masked_latency array: ', lentency_sub)
+            latency_sum += np.sum(lentency_sub)
+        # import pdb; pdb.set_trace()
+
+    return latency_sum
 
 def kaiming_normal_fanin_init(m):
     if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
@@ -76,11 +137,16 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
 
     for alpha in arch_parameters:
         alpha[:, 0] = -INF
+
     network_origin.set_alphas(arch_parameters)
     network_thin_origin.set_alphas(arch_parameters)
 
     # Original flops
     network_original_flops, _ = get_model_infos(network_origin, xshape)
+
+    # original latency
+    network_original_latency = get_estimated_mcu_latency(network_origin, xargs)
+    # print('network_original_latency', network_original_latency)
 
     # print('initial alpha for network_origin')
     # print(network_origin.show_alphas())
@@ -90,6 +156,7 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
     ntk_all = []  # (ntk, (edge_idx, op_idx))
     regions_all = []  # (regions, (edge_idx, op_idx))
     flops_all = []  # (flops, (edge_idx, op_idx))
+    latency_all = []  # (latency, (edge_idx, op_idx))
     choice2regions = {}  # (edge_idx, op_idx): regions
     pbar = tqdm(total=int(sum(alpha.sum() for alpha in alpha_active)), position=0, leave=True)
     for idx_ct in range(len(arch_parameters)):
@@ -115,6 +182,7 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
                     ntk_delta = []
                     repeat = xargs.repeat
                     flops_delta = []
+                    latency_delta = []
                     for _ in range(repeat):
                         # random reinit
                         init_model(network_origin, xargs.init+"_fanout" if xargs.init.startswith('kaiming') else xargs.init)  # for backward
@@ -133,13 +201,23 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
 
                         # FLOPS count
                         network_flops, _ = get_model_infos(network, xshape)
+
                         # lower the more likely to be prunned
                         flops_delta.append(round((network_original_flops - network_flops) / network_original_flops, precision))
+
+                        # latency estimate
+                        network_latency = get_estimated_mcu_latency(network, xargs)
+                        # print('network_latency', network_latency)
+                        latency_delta.append(round((network_original_latency - network_latency) / network_original_latency, precision))
+
 
                     ntk_all.append([np.mean(ntk_delta), (idx_ct, idx_edge, idx_op)])  # change of ntk
 
                     flops_all.append([np.mean(flops_delta), (idx_ct, idx_edge, idx_op)])  # change of flops
 
+                    latency_all.append([np.mean(latency_delta), (idx_ct, idx_edge, idx_op)])  # change of Latency                    
+
+                    
                     network.zero_grad()
                     network_origin.zero_grad()
                     #############################
@@ -175,7 +253,7 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
 
     ntk_all = sorted(ntk_all, key=lambda tup: round_to(tup[0], precision), reverse=True)  # descending: we want to prune op to decrease ntk, i.e. to make ntk_origin > ntk
     # print("NTK conds:", ntk_all)
-    rankings = {}  # dict of (cell_idx, edge_idx, op_idx): [ntk_rank, regions_rank]
+    rankings = {}  # dict of (cell_idx, edge_idx, op_idx): [ntk_rank, regions_rank, flops, latency]
     for idx, data in enumerate(ntk_all):
         if idx == 0:
             rankings[data[1]] = [idx]
@@ -209,13 +287,25 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
             else:
                 rankings[data[1]].append(rankings[flops_all[idx-1][1]][2]+1)
 
-    rankings_list = [[k, v] for k, v in rankings.items()]  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
+    latency_all = sorted(latency_all, key=lambda tup: round_to(tup[0], precision), reverse=True)  # descending: we want to prune op to decrease Latency
+    for idx, data in enumerate(latency_all):
+        if idx == 0:
+            rankings[data[1]].append(idx)
+        else:
+            if data[0] == latency_all[idx-1][0]:
+                # same flops as previous
+                rankings[data[1]].append(rankings[latency_all[idx-1][1]][3])
+            else:
+                rankings[data[1]].append(rankings[latency_all[idx-1][1]][3]+1)
+
+    
+    rankings_list = [[k, v] for k, v in rankings.items()]  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank, latency_rank]
     # ascending by sum of two rankings
     # rankings_sum = sorted(rankings_list, key=lambda tup: sum(tup[1]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
-    rankings_sum = sorted(rankings_list, key=lambda tup: np.average(tup[1], weights = [(1-xargs.flops_weight)/2, (1-xargs.flops_weight)/2, xargs.flops_weight]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
+    rankings_sum = sorted(rankings_list, key=lambda tup: np.average(tup[1], weights = [(1-xargs.flops_weight-xargs.latency_weight)/2, (1-xargs.flops_weight-xargs.latency_weight)/2, xargs.flops_weight, xargs.latency_weight]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
     
     edge2choice = {}  # (cell_idx, edge_idx): list of (cell_idx, edge_idx, op_idx) of length prune_number
-    for (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank] in rankings_sum:
+    for (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank, latency_rank] in rankings_sum:
         if (cell_idx, edge_idx) not in edge2choice:
             edge2choice[(cell_idx, edge_idx)] = [(cell_idx, edge_idx, op_idx)]
         elif len(edge2choice[(cell_idx, edge_idx)]) < prune_number:
@@ -230,7 +320,7 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
     return arch_parameters, choices_edges
 
 
-def prune_func_rank_group(xargs, arch_parameters, model_config, model_config_thin, loader, lrc_model, search_space, edge_groups=[(0, 2), (2, 5), (5, 9), (9, 14)], num_per_group=2, precision=10):
+def prune_func_rank_group(xargs, arch_parameters, model_config, model_config_thin, loader, lrc_model, search_space, edge_groups=[(0, 2), (2, 5), (5, 9), (9, 14)], num_per_group=2, precision=10, xshape = (1, 3, 32, 32)):
     # arch_parameters now has three dim: cell_type, edge, op
     network_origin = get_cell_based_tiny_net(model_config).cuda().train()
     init_model(network_origin, xargs.init)
@@ -242,17 +332,32 @@ def prune_func_rank_group(xargs, arch_parameters, model_config, model_config_thi
     network_origin.set_alphas(arch_parameters)
     network_thin_origin.set_alphas(arch_parameters)
 
+    # Original flops
+    network_original_flops, _ = get_model_infos(network_origin, xshape)
+
+    # original latency
+    network_original_latency = get_estimated_mcu_latency(network_origin, xargs)
+    # print('network_original_latency', network_original_latency)
+
+
     alpha_active = [(nn.functional.softmax(alpha, 1) > 0.01).float() for alpha in arch_parameters]
+    # ntk_all = []  # (ntk, (edge_idx, op_idx))
+    # regions_all = []  # (regions, (edge_idx, op_idx))
+    # choice2regions = {}  # (edge_idx, op_idx): regions
+
     ntk_all = []  # (ntk, (edge_idx, op_idx))
     regions_all = []  # (regions, (edge_idx, op_idx))
+    flops_all = []  # (flops, (edge_idx, op_idx))
+    latency_all = []  # (latency, (edge_idx, op_idx))
     choice2regions = {}  # (edge_idx, op_idx): regions
+
     pbar = tqdm(total=int(sum(alpha.sum() for alpha in alpha_active)), position=0, leave=True)
     assert edge_groups[-1][1] == len(arch_parameters[0])
     for idx_ct in range(len(arch_parameters)):
         # cell type (ct): normal or reduce
         for idx_group in range(len(edge_groups)):
             edge_group = edge_groups[idx_group]
-            # print("Pruning cell %s group %s.........."%("normal" if idx_ct == 0 else "reduction", str(edge_group)))
+            print("Pruning cell %s group %s.........."%("normal" if idx_ct == 0 else "reduction", str(edge_group)))
             if edge_group[1] - edge_group[0] <= num_per_group:
                 # this group already meets the num_per_group requirement
                 pbar.update(1)
@@ -270,6 +375,8 @@ def prune_func_rank_group(xargs, arch_parameters, model_config, model_config_thi
                         network.set_alphas(_arch_param)
                         ntk_delta = []
                         repeat = xargs.repeat
+                        flops_delta = []
+                        latency_delta = []
                         for _ in range(repeat):
                             # random reinit
                             init_model(network_origin, xargs.init+"_fanout" if xargs.init.startswith('kaiming') else xargs.init)  # for backward
@@ -281,7 +388,24 @@ def prune_func_rank_group(xargs, arch_parameters, model_config, model_config_thi
                             ntk_origin, ntk = get_ntk_n(loader, [network_origin, network], recalbn=0, train_mode=True, num_batch=1)
                             # ####################
                             ntk_delta.append(round((ntk_origin - ntk) / ntk_origin, precision))
+
+                            # FLOPS count
+                            network_flops, _ = get_model_infos(network, xshape)
+
+                            # lower the more likely to be prunned
+                            flops_delta.append(round((network_original_flops - network_flops) / network_original_flops, precision))
+
+                            # latency estimate
+                            network_latency = get_estimated_mcu_latency(network, xargs)
+                            # print('network_latency', network_latency)
+                            latency_delta.append(round((network_original_latency - network_latency) / network_original_latency, precision))
+
                         ntk_all.append([np.mean(ntk_delta), (idx_ct, idx_edge, idx_op)])  # change of ntk
+
+                        flops_all.append([np.mean(flops_delta), (idx_ct, idx_edge, idx_op)])  # change of flops
+
+                        latency_all.append([np.mean(latency_delta), (idx_ct, idx_edge, idx_op)])  # change of Latency
+                        
                         network.zero_grad()
                         network_origin.zero_grad()
                         #############################
@@ -338,17 +462,50 @@ def prune_func_rank_group(xargs, arch_parameters, model_config, model_config_thi
                         rankings[data[1]].append(rankings[regions_all[idx-1][1]][1])
                     else:
                         rankings[data[1]].append(rankings[regions_all[idx-1][1]][1]+1)
+
+            flops_all = sorted(flops_all, key=lambda tup: round_to(tup[0], precision), reverse=True)  # descending: we want to prune op to decrease flops
+            for idx, data in enumerate(flops_all):
+                if idx == 0:
+                    rankings[data[1]].append(idx)
+                else:
+                    if data[0] == flops_all[idx-1][0]:
+                        # same flops as previous
+                        rankings[data[1]].append(rankings[flops_all[idx-1][1]][2])
+                    else:
+                        rankings[data[1]].append(rankings[flops_all[idx-1][1]][2]+1)
+
+            latency_all = sorted(latency_all, key=lambda tup: round_to(tup[0], precision), reverse=True)  # descending: we want to prune op to decrease Latency
+            for idx, data in enumerate(latency_all):
+                if idx == 0:
+                    rankings[data[1]].append(idx)
+                else:
+                    if data[0] == latency_all[idx-1][0]:
+                        # same flops as previous
+                        rankings[data[1]].append(rankings[latency_all[idx-1][1]][3])
+                    else:
+                        rankings[data[1]].append(rankings[latency_all[idx-1][1]][3]+1)
+
+
             rankings_list = [[k, v] for k, v in rankings.items()]  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank]
+            
             # ascending by sum of two rankings
-            rankings_sum = sorted(rankings_list, key=lambda tup: sum(tup[1]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank]
+            # rankings_sum = sorted(rankings_list, key=lambda tup: sum(tup[1]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank]
+            rankings_sum = sorted(rankings_list, key=lambda tup: np.average(tup[1], weights = [(1-xargs.flops_weight-xargs.latency_weight)/2, (1-xargs.flops_weight-xargs.latency_weight)/2, xargs.flops_weight, xargs.latency_weight]), reverse=False)  # list of (cell_idx, edge_idx, op_idx), [ntk_rank, regions_rank, flops_rank]
+
             choices = [item[0] for item in rankings_sum[:-num_per_group]]
             # print("Final Ranking:", rankings_sum)
             # print("Pruning Choices:", choices)
             for (cell_idx, edge_idx, op_idx) in choices:
                 arch_parameters[cell_idx].data[edge_idx, op_idx] = -INF
             # reinit
+            # ntk_all = []  # (ntk, (edge_idx, op_idx))
+            # regions_all = []  # (regions, (edge_idx, op_idx))
+            # choice2regions = {}  # (edge_idx, op_idx): regions
+
             ntk_all = []  # (ntk, (edge_idx, op_idx))
             regions_all = []  # (regions, (edge_idx, op_idx))
+            flops_all = []  # (flops, (edge_idx, op_idx))
+            latency_all = []  # (latency, (edge_idx, op_idx))
             choice2regions = {}  # (edge_idx, op_idx): regions
 
     return arch_parameters
@@ -397,7 +554,7 @@ def main(xargs):
     logger.log('||||||| {:10s} ||||||| Train-Loader-Num={:}, batch size={:}'.format(xargs.dataset, len(train_loader), config.batch_size))
     logger.log('||||||| {:10s} ||||||| Config={:}'.format(xargs.dataset, config))
 
-    logger.log('||||||| {:10s} ||||||| {:}'.format("rank weights (ntk, lr, flops)", [(1-xargs.flops_weight)/2, (1-xargs.flops_weight)/2, xargs.flops_weight]))
+    logger.log('||||||| {:10s} ||||||| {:}'.format("rank weights (ntk, lr, flops, latency)", [(1-xargs.flops_weight-xargs.latency_weight)/2, (1-xargs.flops_weight-xargs.latency_weight)/2, xargs.flops_weight, xargs.latency_weight]))
 
     search_space = get_search_spaces('cell', xargs.search_space_name)
     if xargs.search_space_name == 'nas-bench-201':
@@ -433,19 +590,20 @@ def main(xargs):
                                    'multiplier': 4,
                                   })
     ## my test space                              
-    elif xargs.search_space_name == 'Ye':
-        model_config = edict({'name': 'DARTS-V1',
-                              'C': 3, 'N': 1, 'depth': -1, 'use_stem': True,
-                              'max_nodes': xargs.max_nodes, 'num_classes': class_num,
-                              'space': search_space,
-                              'affine': True, 'track_running_stats': bool(xargs.track_running_stats),
-                             })
-        model_config_thin = edict({'name': 'DARTS-V1',
-                                   'C': 1, 'N': 1, 'depth': 1, 'use_stem': False,
-                                   'max_nodes': xargs.max_nodes, 'num_classes': class_num,
-                                   'space': search_space,
-                                   'affine': True, 'track_running_stats': bool(xargs.track_running_stats),
-                                  })
+    # elif xargs.search_space_name == 'Ye':
+    #     model_config = edict({'name': 'DARTS-V1',
+    #                           'C': 3, 'N': 1, 'depth': -1, 'use_stem': True,
+    #                           'max_nodes': xargs.max_nodes, 'num_classes': class_num,
+    #                           'space': search_space,
+    #                           'affine': True, 'track_running_stats': bool(xargs.track_running_stats),
+    #                          })
+    #     model_config_thin = edict({'name': 'DARTS-V1',
+    #                                'C': 1, 'N': 1, 'depth': 1, 'use_stem': False,
+    #                                'max_nodes': xargs.max_nodes, 'num_classes': class_num,
+    #                                'space': search_space,
+    #                                'affine': True, 'track_running_stats': bool(xargs.track_running_stats),
+    #                               })
+    
     network = get_cell_based_tiny_net(model_config)
     logger.log('model-config : {:}'.format(model_config))
     arch_parameters = [alpha.detach().clone() for alpha in network.get_alphas()]
@@ -502,7 +660,7 @@ def main(xargs):
         genotypes['arch'][epoch] = network.genotype()
 
         logger.log('operators remaining (1s) and prunned (0s)\n{:}'.format('\n'.join([str((alpha > -INF).int()) for alpha in network.get_alphas()])))
-
+        logger.log("Flops estimation for MCU for current iteration is : {:.2f}".format(get_estimated_mcu_latency(network, xargs)))
     if xargs.search_space_name == 'darts':
         print("===>>> Prune Edge Groups...")
         arch_parameters = prune_func_rank_group(xargs, arch_parameters, model_config, model_config_thin, train_loader, lrc_model, search_space,
@@ -526,7 +684,10 @@ def main(xargs):
     if api is not None:
         logger.log('{:}'.format(api.query_by_arch(genotypes['arch'][epoch])))
 
-    logger.log("printed final model info: \n", network)
+    logger.log("printed final model info: \n{:}".format(network))
+    final_latency = get_estimated_mcu_latency(network, xargs)
+    logger.log("Latency estimation for MCU: {:.2f}".format(final_latency))
+    logger.log('||||||| {:10s} ||||||| {:}'.format("rank weights (ntk, lr, flops, latency)", [(1-xargs.flops_weight-xargs.latency_weight)/2, (1-xargs.flops_weight-xargs.latency_weight)/2, xargs.flops_weight, xargs.latency_weight]))
     logger.close()
     torch.save(network, config.save_dir + 'saved_model.pkl')
     pytorch2onnx(config.save_dir + 'saved_model.pkl', config.save_dir + 'saved_onnx_model.pkl', [3,32,32])
@@ -551,6 +712,8 @@ if __name__ == '__main__':
     parser.add_argument('--init', default='kaiming_uniform', help='use gaussian init')
     parser.add_argument('--super_type', type=str, default='basic',  help='type of supernet: basic or nasnet-super')
     parser.add_argument('--flops_weight', type=float, default=0, help='weight of flops in the ranking system, range from 0 to 1')
+    parser.add_argument('--latency_weight', type=float, default=0, help='weight of latency in the ranking system, range from 0 to 1')
+    
     args = parser.parse_args()
     if args.rand_seed is None or args.rand_seed < 0:
         args.rand_seed = random.randint(1, 100000)

@@ -55,6 +55,7 @@ def get_ntk_n(xloader, networks, recalbn=0, train_mode=False, num_batch=-1):
     ntks = [torch.einsum('nc,mc->nm', [_grads, _grads]) for _grads in grads]
     conds = []
     for ntk in ntks:
-        eigenvalues, _ = torch.symeig(ntk)  # ascending
+        # eigenvalues, _ = torch.symeig(ntk)  # ascending
+        eigenvalues, _ = torch.linalg.eigh(ntk)
         conds.append(np.nan_to_num((eigenvalues[-1] / eigenvalues[0]).item(), copy=True, nan=100000.0))
     return conds

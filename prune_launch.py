@@ -9,7 +9,7 @@ data_paths = {
     "cifar10": "./data.cifar10",
     "cifar100": "/ssd1/cifar.python",
     "ImageNet16-120": "/ssd1/ImageNet16",
-    "imagenet-1k": "/ssd2/chenwy/imagenet_final",
+    "imagenet-1k": " /home/haochx5/Dataset/imagenet",
 }
 
 
@@ -20,6 +20,7 @@ parser.add_argument('--dataset', default='cifar100', type=str, choices=['cifar10
 parser.add_argument('--seed', default=0, type=int, help='manual seed')
 parser.add_argument('--max_node', default=4, type=int, help='The maximum number of nodes.')
 parser.add_argument('--flops_weight', type=float, default=0, help='weight of flops in the ranking system, range from 0 to 1')
+parser.add_argument('--latency_weight', type=float, default=0, help='weight of latency in the ranking system, range from 0 to 1')
 args = parser.parse_args()
 
 
@@ -71,6 +72,7 @@ core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas.
 --batch_size {batch_size} \
 --prune_number {prune_number} \
 --flops_weight {flops_weight} \
+--latency_weight {latency_weight} \
 ".format(
     gpuid=args.gpu,
     save_dir="./output/prune-{space}/{dataset}".format(space=space, dataset=args.dataset),
@@ -87,6 +89,7 @@ core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas.
     batch_size=batch_size,
     prune_number=prune_number,
     flops_weight=args.flops_weight,
+    latency_weight=args.latency_weight,
 )
 
 os.system(core_cmd)
