@@ -35,13 +35,13 @@ latency_table_nasbench = {
 
 latency_table_darts = {
     'none' : 0, 
-    'skip_connect' : 1.5, 
-    'sep_conv_3x3' : 80, 
-    'sep_conv_5x5' : 170, 
-    'dil_conv_3x3' : 40, 
-    'dil_conv_5x5' : 85, 
-    'avg_pool_3x3' : 24, 
-    'max_pool_3x3' : 24
+    'skip_connect' : 1.963, 
+    'sep_conv_3x3' : 180.838, 
+    'sep_conv_5x5' : 223.902, 
+    'dil_conv_3x3' : 183.645, 
+    'dil_conv_5x5' : 238.948, 
+    'avg_pool_3x3' : 15.672, 
+    'max_pool_3x3' : 15.054
 }
 
 # def get_estimated_mcu_latency(network):
@@ -176,7 +176,7 @@ def prune_func_rank(xargs, arch_parameters, model_config, model_config_thin, loa
                     network = get_cell_based_tiny_net(model_config).cuda().train()
                     network.set_alphas(_arch_param)
 
-                    # print('initial alpha for network')
+                    # print('initial alpha for net.7]work')
                     # print(network.show_alphas())
 
                     ntk_delta = []
@@ -632,8 +632,8 @@ def main(xargs):
     start_time = time.time()
     epoch = -1
 
-    if args.resume_search:
-        arch_parameters = torch.from_numpy(np.load("arch_parameters_history_imagenet.npy")[-1]).cuda() 
+    # if args.resume_search:
+    #     arch_parameters = torch.from_numpy(np.load("arch_parameters_history_imagenet.npy")[-1]).cuda() 
 
     for alpha in arch_parameters:
         alpha[:, 0] = -INF
