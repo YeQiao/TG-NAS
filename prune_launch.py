@@ -21,6 +21,7 @@ parser.add_argument('--seed', default=0, type=int, help='manual seed')
 parser.add_argument('--max_node', default=4, type=int, help='The maximum number of nodes.')
 parser.add_argument('--flops_weight', type=float, default=0, help='weight of flops in the ranking system, range from 0 to 1')
 parser.add_argument('--latency_weight', type=float, default=0, help='weight of latency in the ranking system, range from 0 to 1')
+# parser.add_argument('--resume_search', action=argparse.BooleanOptionalAction)
 args = parser.parse_args()
 
 
@@ -50,7 +51,7 @@ elif args.space == "darts":
         # batch_size = 6
     elif args.dataset == "imagenet-1k":
         prune_number = 2
-        batch_size = 24
+        batch_size = 128
 
 
 timestamp = "{:}".format(time.strftime('%h-%d-%C_%H-%M-%s', time.gmtime(time.time())))
@@ -73,6 +74,7 @@ core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas.
 --prune_number {prune_number} \
 --flops_weight {flops_weight} \
 --latency_weight {latency_weight} \
+--resume_search \
 ".format(
     gpuid=args.gpu,
     save_dir="./output/prune-{space}/{dataset}".format(space=space, dataset=args.dataset),

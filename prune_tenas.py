@@ -632,6 +632,9 @@ def main(xargs):
     start_time = time.time()
     epoch = -1
 
+    if args.resume_search:
+        arch_parameters = torch.from_numpy(np.load("arch_parameters_history_imagenet.npy")[-1]).cuda() 
+
     for alpha in arch_parameters:
         alpha[:, 0] = -INF
     arch_parameters_history.append([alpha.detach().clone() for alpha in arch_parameters])
@@ -660,7 +663,7 @@ def main(xargs):
         genotypes['arch'][epoch] = network.genotype()
 
         logger.log('operators remaining (1s) and prunned (0s)\n{:}'.format('\n'.join([str((alpha > -INF).int()) for alpha in network.get_alphas()])))
-        logger.log("Flops estimation for MCU for current iteration is : {:.2f}".format(get_estimated_mcu_latency(network, xargs)))
+        logger.log("Latency estimation for MCU for current iteration is : {:.2f}".format(get_estimated_mcu_latency(network, xargs)))
     if xargs.search_space_name == 'darts':
         print("===>>> Prune Edge Groups...")
         arch_parameters = prune_func_rank_group(xargs, arch_parameters, model_config, model_config_thin, train_loader, lrc_model, search_space,
@@ -684,7 +687,7 @@ def main(xargs):
     if api is not None:
         logger.log('{:}'.format(api.query_by_arch(genotypes['arch'][epoch])))
 
-    logger.log("printed final model info: \n{:}".format(network))
+    logger.log("Flops of searched model: \n{:}".format(get_model_infos(network, xshape)))
     final_latency = get_estimated_mcu_latency(network, xargs)
     logger.log("Latency estimation for MCU: {:.2f}".format(final_latency))
     logger.log('||||||| {:10s} ||||||| {:}'.format("rank weights (ntk, lr, flops, latency)", [(1-xargs.flops_weight-xargs.latency_weight)/2, (1-xargs.flops_weight-xargs.latency_weight)/2, xargs.flops_weight, xargs.latency_weight]))
@@ -713,7 +716,7 @@ if __name__ == '__main__':
     parser.add_argument('--super_type', type=str, default='basic',  help='type of supernet: basic or nasnet-super')
     parser.add_argument('--flops_weight', type=float, default=0, help='weight of flops in the ranking system, range from 0 to 1')
     parser.add_argument('--latency_weight', type=float, default=0, help='weight of latency in the ranking system, range from 0 to 1')
-    
+    parser.add_argument('--resume_search', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     if args.rand_seed is None or args.rand_seed < 0:
         args.rand_seed = random.randint(1, 100000)
