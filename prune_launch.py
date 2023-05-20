@@ -12,7 +12,6 @@ data_paths = {
     "imagenet-1k": " /home/haochx5/Dataset/imagenet",
 }
 
-
 parser = argparse.ArgumentParser("TENAS_launch")
 parser.add_argument('--gpu', default=0, type=int, help='use gpu with cuda number')
 parser.add_argument('--space', default='nas-bench-201', type=str, choices=['nas-bench-201', 'darts', 'Ye'], help='which nas search space to use')
@@ -56,42 +55,73 @@ elif args.space == "darts":
 
 timestamp = "{:}".format(time.strftime('%h-%d-%C_%H-%M-%s', time.gmtime(time.time())))
 
-
-core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas.py \
---save_dir {save_dir} --max_nodes {max_nodes} \
---dataset {dataset} \
---data_path {data_path} \
---search_space_name {space} \
---super_type {super_type} \
---arch_nas_dataset {TORCH_HOME}NAS-Bench-201-v1_0-e61699.pth \
---track_running_stats 1 \
---workers 0 --rand_seed {seed} \
---timestamp {timestamp} \
---precision {precision} \
---init {init} \
---repeat 3 \
---batch_size {batch_size} \
---prune_number {prune_number} \
---flops_weight {flops_weight} \
---latency_weight {latency_weight} \
---resume_search \
-".format(
-    gpuid=args.gpu,
-    save_dir="./output/prune-{space}/{dataset}".format(space=space, dataset=args.dataset),
-    max_nodes=args.max_node,
-    data_path=data_paths[args.dataset],
-    dataset=args.dataset,
-    TORCH_HOME=TORCH_HOME,
-    space=space,
-    super_type=super_type,
-    seed=args.seed,
-    timestamp=timestamp,
-    precision=precision,
-    init=init,
-    batch_size=batch_size,
-    prune_number=prune_number,
-    flops_weight=args.flops_weight,
-    latency_weight=args.latency_weight,
-)
+if args.flops_weight != 0:
+    core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas_flops.py \
+    --save_dir {save_dir} --max_nodes {max_nodes} \
+    --dataset {dataset} \
+    --data_path {data_path} \
+    --search_space_name {space} \
+    --super_type {super_type} \
+    --arch_nas_dataset {TORCH_HOME}NAS-Bench-201-v1_0-e61699.pth \
+    --track_running_stats 1 \
+    --workers 0 --rand_seed {seed} \
+    --timestamp {timestamp} \
+    --precision {precision} \
+    --init {init} \
+    --repeat 3 \
+    --batch_size {batch_size} \
+    --prune_number {prune_number} \
+    --flops_weight {flops_weight} \
+    ".format(
+        gpuid=args.gpu,
+        save_dir="./output/prune-{space}/{dataset}".format(space=space, dataset=args.dataset),
+        max_nodes=args.max_node,
+        data_path=data_paths[args.dataset],
+        dataset=args.dataset,
+        TORCH_HOME=TORCH_HOME,
+        space=space,
+        super_type=super_type,
+        seed=args.seed,
+        timestamp=timestamp,
+        precision=precision,
+        init=init,
+        batch_size=batch_size,
+        prune_number=prune_number,
+        flops_weight=args.flops_weight,
+    )
+else:
+    core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas_latency.py \
+    --save_dir {save_dir} --max_nodes {max_nodes} \
+    --dataset {dataset} \
+    --data_path {data_path} \
+    --search_space_name {space} \
+    --super_type {super_type} \
+    --arch_nas_dataset {TORCH_HOME}NAS-Bench-201-v1_0-e61699.pth \
+    --track_running_stats 1 \
+    --workers 0 --rand_seed {seed} \
+    --timestamp {timestamp} \
+    --precision {precision} \
+    --init {init} \
+    --repeat 3 \
+    --batch_size {batch_size} \
+    --prune_number {prune_number} \
+    --latency_weight {latency_weight} \
+    ".format(
+        gpuid=args.gpu,
+        save_dir="./output/prune-{space}/{dataset}".format(space=space, dataset=args.dataset),
+        max_nodes=args.max_node,
+        data_path=data_paths[args.dataset],
+        dataset=args.dataset,
+        TORCH_HOME=TORCH_HOME,
+        space=space,
+        super_type=super_type,
+        seed=args.seed,
+        timestamp=timestamp,
+        precision=precision,
+        init=init,
+        batch_size=batch_size,
+        prune_number=prune_number,
+        latency_weight=args.latency_weight,
+    )   
 
 os.system(core_cmd)
