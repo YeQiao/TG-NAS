@@ -79,7 +79,7 @@ class NASNetworkDARTS(nn.Module):
         cmd = "Genotype(normal=%s, normal_concat=[2, 3, 4, 5], reduce=%s, reduce_concat=[2, 3, 4, 5])"%(genotype['normal'], genotype['reduce'])
         return cmd
 
-    def genotype(self) -> Dict[Text, List]:
+    def genotype(self, ifdic = False) -> Dict[Text, List]:
         def _parse(weights):
             gene = []
             n = 2; start = 0
@@ -99,6 +99,8 @@ class NASNetworkDARTS(nn.Module):
         with torch.no_grad():
             gene_normal = _parse(torch.softmax(self.arch_normal_parameters, dim=-1).cpu().numpy())
             gene_reduce = _parse(torch.softmax(self.arch_reduce_parameters, dim=-1).cpu().numpy())
+        if ifdic:
+            return {'normal': gene_normal, 'normal_concat': list(range(2+self._steps-self._multiplier, self._steps+2)), 'reduce': gene_reduce, 'reduce_concat': list(range(2+self._steps-self._multiplier, self._steps+2))}
         return self.genotype2cmd({'normal': gene_normal, 'normal_concat': list(range(2+self._steps-self._multiplier, self._steps+2)), 'reduce': gene_reduce, 'reduce_concat': list(range(2+self._steps-self._multiplier, self._steps+2))})
 
     def forward(self, inputs):

@@ -9,7 +9,7 @@ data_paths = {
     "cifar10": "./data.cifar10",
     "cifar100": "/ssd1/cifar.python",
     "ImageNet16-120": "/ssd1/ImageNet16",
-    "imagenet-1k": "/ssd2/chenwy/imagenet_final",
+    "imagenet-1k": "/home/data/share/Dataset/imagenet",
 }
 
 
@@ -20,11 +20,15 @@ parser.add_argument('--dataset', default='cifar100', type=str, choices=['cifar10
 parser.add_argument('--seed', default=0, type=int, help='manual seed')
 parser.add_argument('--max_node', default=4, type=int, help='The maximum number of nodes.')
 parser.add_argument('--flops_weight', type=float, default=0, help='weight of flops in the ranking system, range from 0 to 1')
+parser.add_argument('--latency_weight', type=float, default=0, help='weight of latency in the ranking system, range from 0 to 1')
+# parser.add_argument('--resume_search', action=argparse.BooleanOptionalAction)
+parser.add_argument('--embedding_model', type=str, default='all-mpnet-base-v2', help='sentence transformer model to use')
+parser.add_argument('--embedding_size', type=int, default=384, help='embedding size')
 args = parser.parse_args()
 
 
 ##### Basic Settings
-precision = 3
+precision = 5
 # init = 'normal'
 # init = 'kaiming_uniform'
 init = 'kaiming_normal'
@@ -54,8 +58,9 @@ elif args.space == "darts":
 
 timestamp = "{:}".format(time.strftime('%h-%d-%C_%H-%M-%s', time.gmtime(time.time())))
 
+# --embedding_size {embedding_size}\
 
-core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas.py \
+core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas_gnn_darts.py \
 --save_dir {save_dir} --max_nodes {max_nodes} \
 --dataset {dataset} \
 --data_path {data_path} \
@@ -71,6 +76,9 @@ core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas.
 --batch_size {batch_size} \
 --prune_number {prune_number} \
 --flops_weight {flops_weight} \
+--latency_weight {latency_weight} \
+--resume_search \
+--embedding_model {embedding_model}\
 ".format(
     gpuid=args.gpu,
     save_dir="./output/prune-{space}/{dataset}".format(space=space, dataset=args.dataset),
@@ -87,6 +95,9 @@ core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./prune_tenas.
     batch_size=batch_size,
     prune_number=prune_number,
     flops_weight=args.flops_weight,
+    latency_weight=args.latency_weight,
+    embedding_model = args.embedding_model,
+    # embedding_size = args.embedding_size,
 )
 
 os.system(core_cmd)

@@ -24,7 +24,7 @@ from enum import Enum
 import re
 import math
 import torch.nn.functional as F
-from sklearn.metrics import precision_recall_fscore_support, recall_score, precision_score, f1_score
+# from sklearn.metrics import precision_recall_fscore_support, recall_score, precision_score, f1_score
 from collections import defaultdict
 from scipy import stats 
 from torch.utils.tensorboard import SummaryWriter
@@ -381,11 +381,11 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
 def save_checkpoint(state, is_best, save):
     if not os.path.exists(save):
         os.makedirs(save)
-    filename = os.path.join(save, 'checkpoint.pth.tar')
-    torch.save(state, filename)
     if is_best:
-        best_filename = os.path.join(save, 'model_best.pth.tar')
-        shutil.copyfile(filename, best_filename)
+        # best_filename = os.path.join(save, 'model_best.pth.tar')
+        # shutil.copyfile(filename, best_filename)
+        filename = os.path.join(save, 'checkpoint.pth.tar')
+        torch.save(state, filename)
 
 
 def adjust_learning_rate(optimizer, epoch, args):
