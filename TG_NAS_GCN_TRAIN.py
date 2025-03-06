@@ -237,8 +237,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path', type=str, default='/home/yeq6/Research_project/MicroNAS/nasbench_101_dataset.pkl', help='location of the data')
-    parser.add_argument('--data_path_201', type=str, default='/home/yeq6/Research_project/MicroNAS/nasbench_201_dataset_selected_1.pkl', help='location of the 201 data')
+    parser.add_argument('--data_path', type=str, default='/home/jingchl6/.local/TG-NAS/nasbench_101_dataset_sentence.pkl', help='location of the data')
+    parser.add_argument('--data_path_201', type=str, default='/shared/jingchl6/TG-NAS/NAS-Bench-201-v1_1-096897.pth', help='location of the 201 data')
     parser.add_argument('--device', type=str, default='cuda', help='device')
     parser.add_argument('--batch_size', type=int, default=128, help='batch size')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='init learning rate')
@@ -249,7 +249,7 @@ if __name__ == "__main__":
     parser.add_argument('--use_201_to_test', action=argparse.BooleanOptionalAction)
     parser.add_argument('--use_201_to_train', action=argparse.BooleanOptionalAction)
     parser.add_argument('--use_201_to_tune', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--model_path', type=str, default='/home/yeq6/Research_project/MicroNAS/GNN_Evaluation_Result/checkpoint/checkpoint.pth.tar', help='location of the GNN model')
+    parser.add_argument('--model_path', type=str, default='/home/jingchl6/.local/TG-NAS/GNN_Evaluation_Result/checkpoint/checkpoint.pth.tar', help='location of the GNN model')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument('--weight_decay', type=float, default=3e-5, help='weight decay')
     parser.add_argument('--comment', type=str, default='', help='device')
