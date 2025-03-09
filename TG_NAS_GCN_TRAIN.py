@@ -9,6 +9,8 @@ from GNN_proxy_tool.dataloader import Nas_101_Dataset,Nas_201_Dataset
 from util import *
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from torch.utils.data import TensorDataset, ConcatDataset, DataLoader
+from tqdm import tqdm
+
 OPS =  ["input", "conv3x3-bn-relu", "conv1x1-bn-relu", "maxpool3x3", "output"]
 
 
@@ -41,11 +43,12 @@ def train(model, optimizer, loss, train_loader, epoch):
     predicted = []
     ground_truth = []
     model.train()
-    for i_batch, sample_batched in enumerate(train_loader):
+    for i_batch, sample_batched in tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Epoch {epoch+1} Training"):
         adjs, features, accuracys = sample_batched['adjacency_matrix'], sample_batched['operations'], \
                                     sample_batched['accuracy'].view(-1, 1)
         adjs, features, accuracys = adjs.cuda(), features.cuda(), accuracys.cuda()
         optimizer.zero_grad()
+        # print(features.shape)
         outputs = model(features, adjs)
         loss_train = loss(outputs, accuracys)
         loss_train.backward()
@@ -67,8 +70,8 @@ def train(model, optimizer, loss, train_loader, epoch):
     #     corr) + "kendalltau_corr:{:.6f}".format(
     #     kt))
     print("epoch {:d}".format(epoch + 1) + " train results:" + "train loss= {:.6f}".format(
-        total_loss_train / count) + "abs_error:{:.6f}".format(total_difference / count) + "spearmanr_corr:{:.6f}".format(
-        corr) + "kendalltau_corr:{:.6f}".format(
+        total_loss_train / count) + " abs_error:{:.6f}".format(total_difference / count) + " spearmanr_corr:{:.6f}".format(
+        corr) + " kendalltau_corr:{:.6f}".format(
         kt))
     return kt, corr
 
@@ -80,7 +83,7 @@ def validate(model, loss, validation_loader, logging=None):
     ground_truth = []
     model.eval()
     with torch.no_grad():
-        for i_batch, sample_batched in enumerate(validation_loader):
+        for i_batch, sample_batched in tqdm(enumerate(validation_loader), total=len(validation_loader), desc="Validation"):
             adjs, features, accuracys = sample_batched['adjacency_matrix'], sample_batched['operations'], \
                                         sample_batched['accuracy'].view(-1, 1)
             adjs, features, accuracys = adjs.cuda(), features.cuda(), accuracys.cuda()
@@ -170,14 +173,14 @@ def fit(args, lr, num_epoch, selected_loss, ifsigmoid, batch_size, logger_comple
         print('201 test:')
         validate(model=gcn, loss=selected_loss, validation_loader=train_loader)
 
-    # if args.use_201_to_test:
-    #     dataset_201 = Nas_201_Dataset(pickle_file=args.data_path_201)
-    #     validation_loader = DataLoader(dataset_201, batch_size=batch_size,
-    #                                             shuffle=True)
-    # else:
-    #     validation_loader = DataLoader(val_set, batch_size=batch_size,
-    #                                             shuffle=True)
-
+    if args.use_201_to_test:
+        dataset_201 = Nas_201_Dataset(pickle_file=args.data_path_201)
+        validation_loader = DataLoader(dataset_201, batch_size=batch_size,
+                                                shuffle=True)
+    else:
+        validation_loader = DataLoader(val_set, batch_size=batch_size,
+                                                shuffle=True)
+    # validation_loader = DataLoader(val_set, batch_size=batch_size, shuffle=True)
     loss = selected_loss
 
     best_tau_test = 0
@@ -219,17 +222,25 @@ def main(args):
     torch.manual_seed(0)
     loss = torch.nn.MSELoss()
 
+    use_201_info = ""
+    if args.use_201_to_test:
+        use_201_info += "_use201_test"
+    if args.use_201_to_train:
+        use_201_info += "_use201_train"
+    if args.use_201_to_tune:
+        use_201_info += "_use201_tune"
+
     if args.onehot:
         embedding_name = 'onehot'
     else:
         embedding_name = 'sentence_transformer'
 
     # create logger and save file
-    file_complete = creating_path("new_gnn_result/GNN_Evaluation_Result_" + args.data_path[9:-4] + '_' + str(args.embedding_size),  "logs",
+    file_complete = creating_path("new_gnn_result/GNN_Evaluation_Result_" + args.data_path[9:-4] + '_' + str(args.embedding_size)+ use_201_info,  "logs",
                                   file_name = str(args.batch_size)+ '_' + str(args.learning_rate) + '_' + str(args.train_split) + '_' + args.comment, extension='log')
     logger_complete = create_logger("complete", file_complete)
 
-    save_path = creating_path("new_gnn_result/GNN_Evaluation_Result_" + args.data_path[9:-4] + '_' + str(args.embedding_size), "checkpoint" + str(args.batch_size)+ '_' + str(args.learning_rate) + str(args.train_split) + '_' + args.comment, 
+    save_path = creating_path("new_gnn_result/GNN_Evaluation_Result_" + args.data_path[9:-4] + '_' + str(args.embedding_size)+ use_201_info, "checkpoint" + str(args.batch_size)+ '_' + str(args.learning_rate) + str(args.train_split) + '_' + args.comment, 
                                   file_name = str(args.batch_size)+ '_' + str(args.learning_rate) + str(args.train_split) + '_' + args.comment)
     
     fit(args, args.learning_rate, args.epochs, loss, False, args.batch_size, logger_complete, save_path)
@@ -238,18 +249,18 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str, default='/home/jingchl6/.local/TG-NAS/nasbench_101_dataset_sentence.pkl', help='location of the data')
-    parser.add_argument('--data_path_201', type=str, default='/shared/jingchl6/TG-NAS/NAS-Bench-201-v1_1-096897.pth', help='location of the 201 data')
+    parser.add_argument('--data_path_201', type=str, default='/home/jingchl6/.local/TG-NAS/nasbench_201_dataset_all_sentence_transformer__.pkl', help='location of the 201 data')
     parser.add_argument('--device', type=str, default='cuda', help='device')
     parser.add_argument('--batch_size', type=int, default=128, help='batch size')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='init learning rate')
     parser.add_argument('--epochs', type=int, default=100, help='num of training epochs')
-    parser.add_argument('--train_split', type=float, default=90, help='percentage of data used for training')
-    parser.add_argument('--embedding_size', type=int, default=768, help='embedding size')
+    parser.add_argument('--train_split', type=float, default=100, help='percentage of data used for training')
+    parser.add_argument('--embedding_size', type=int, default=384, help='embedding size')
     parser.add_argument('--onehot', action=argparse.BooleanOptionalAction)
     parser.add_argument('--use_201_to_test', action=argparse.BooleanOptionalAction)
     parser.add_argument('--use_201_to_train', action=argparse.BooleanOptionalAction)
     parser.add_argument('--use_201_to_tune', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--model_path', type=str, default='/home/jingchl6/.local/TG-NAS/GNN_Evaluation_Result/checkpoint/checkpoint.pth.tar', help='location of the GNN model')
+    parser.add_argument('--model_path', type=str, default='/home/jingchl6/.local/TG-NAS/GNN_Evaluation_Result/checkpoint/checkpoint_finetune.pth.tar', help='location of the GNN model')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument('--weight_decay', type=float, default=3e-5, help='weight decay')
     parser.add_argument('--comment', type=str, default='', help='device')

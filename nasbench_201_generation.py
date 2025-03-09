@@ -165,7 +165,7 @@ def main(args):
     else:
         raise ValueError("Invalid sentence type. Expected one of: [short, medium, long]")
 
-    embeddings = model.encode(sentences, device = 'cuda:0')
+    embeddings = model.encode(sentences, device = 'cuda:0') 
     print('embedding loaded')
 
     print('\nIterating over unique models in the dataset.')
@@ -233,7 +233,7 @@ def main(args):
     if args.select:
         with open("nasbench_201_dataset_selected_" + embedding_name  + args.model_path + '_' + args.comment + ".pkl", 'wb') as f:
             pickle.dump(data_selected_list, f)
-    with open("new_data/nasbench_201_dataset_all_" + embedding_name  + args.model_path + '_' + args.comment + ".pkl", 'wb') as f:
+    with open("/home/jingchl6/.local/TG-NAS/nasbench_201_dataset_all_" + embedding_name + args.comment + ".pkl", 'wb') as f:
         pickle.dump(data_all_list, f)
 
 if __name__ == "__main__":
@@ -241,7 +241,8 @@ if __name__ == "__main__":
     parser.add_argument('--select', action=argparse.BooleanOptionalAction)
     parser.add_argument('--onehot', action=argparse.BooleanOptionalAction)
     parser.add_argument('--sentence_length', type=str, default="short")
-    parser.add_argument('--model_path', type=str, default='models/my-64_dim-model', help='sentence transformer model to use')
+    parser.add_argument('--model_path', type=str, default='sentence-transformers/all-MiniLM-L6-v2', help='sentence transformer model to use')
+    # parser.add_argument('--model_path', type=str, default="/home/jingchl6/.local/sentencedata/fine_tuned_sentence_transformer", help='sentence transformer model to use')
     parser.add_argument('--comment', type=str, default='', help='optional comment')
     args = parser.parse_args()
     main(args)
