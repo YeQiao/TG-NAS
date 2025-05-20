@@ -1,3 +1,14 @@
+import pkgutil
+if not hasattr(pkgutil, 'ImpImporter'):
+    pkgutil.ImpImporter = pkgutil.zipimporter
+
+import importlib.machinery
+if not hasattr(importlib.machinery.FileFinder, 'find_module'):
+    # Patch FileFinder to provide a find_module method that uses find_spec.
+    def find_module(self, fullname):
+        spec = self.find_spec(fullname)
+        return spec.loader if spec is not None else None
+    importlib.machinery.FileFinder.find_module = find_module
 import torch
 import numpy as np
 import scipy.stats as stats
@@ -5,7 +16,7 @@ from scipy.stats import spearmanr, kendalltau
 import logging
 import argparse
 from GNN_proxy_tool.models import GCN
-from GNN_proxy_tool.dataloader import Nas_101_Dataset,Nas_201_Dataset
+from GNN_proxy_tool.dataloader import Nas_101_Dataset,Nas_201_Dataset,Nas_301_Dataset
 from util import *
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from torch.utils.data import TensorDataset, ConcatDataset, DataLoader
@@ -127,8 +138,8 @@ def fit(args, lr, num_epoch, selected_loss, ifsigmoid, batch_size, logger_comple
     )
 
     gcn = gcn.to(args.device)
-    optimizer = torch.optim.AdamW(gcn.parameters(),lr=lr)
-    # optimizer = torch.optim.Adam(gcn.parameters(),lr=lr, weight_decay=1e-5)
+    # optimizer = torch.optim.AdamW(gcn.parameters(),lr=lr)
+    optimizer = torch.optim.AdamW(gcn.parameters(),lr=lr, weight_decay=6e-6)
     scheduler = StepLR(optimizer, step_size=40, gamma=0.1)
 
     dataset = Nas_101_Dataset(pickle_file=args.data_path)
@@ -177,8 +188,13 @@ def fit(args, lr, num_epoch, selected_loss, ifsigmoid, batch_size, logger_comple
         dataset_201 = Nas_201_Dataset(pickle_file=args.data_path_201)
         validation_loader = DataLoader(dataset_201, batch_size=batch_size,
                                                 shuffle=True)
+    if args.use_301_to_test:
+        dataset_301 = Nas_301_Dataset(pickle_file=args.data_path_301)
+        validation_loader = DataLoader(dataset_301, batch_size=batch_size,
+                                                shuffle=True)
     else:
-        validation_loader = DataLoader(val_set, batch_size=batch_size,
+        dataset_201 = Nas_201_Dataset(pickle_file=args.data_path_201)
+        validation_loader = DataLoader(dataset_201, batch_size=batch_size,
                                                 shuffle=True)
     # validation_loader = DataLoader(val_set, batch_size=batch_size, shuffle=True)
     loss = selected_loss
@@ -229,7 +245,8 @@ def main(args):
         use_201_info += "_use201_train"
     if args.use_201_to_tune:
         use_201_info += "_use201_tune"
-
+    if args.use_301_to_test:
+        use_201_info += "_use301_test"
     if args.onehot:
         embedding_name = 'onehot'
     else:
@@ -249,8 +266,10 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str, default='/home/jingchl6/.local/TG-NAS/nasbench_101_dataset_sentence.pkl', help='location of the data')
-    parser.add_argument('--data_path_201', type=str, default='/home/jingchl6/.local/TG-NAS/nasbench_201_dataset_all_sentence_transformer__.pkl', help='location of the 201 data')
-    parser.add_argument('--device', type=str, default='cuda', help='device')
+    # parser.add_argument('--data_path_201', type=str, default='/home/jingchl6/.local/TG-NAS/nasbench_201_dataset_all_sentence_transformer_.pkl', help='location of the 201 data')
+    parser.add_argument('--data_path_201', type=str, default='/home/jingchl6/.local/TG-NAS/nasbench_201_dataset_all_sentence_transformer_nofinetune.pkl', help='location of the 201 data')
+    parser.add_argument('--data_path_301', type=str, default='/home/jingchl6/.local/TG-NAS/new_data/nasbench_301_normal_fine_tuned_sentence_transformer_long.pkl', help='location of the 301 data')
+    parser.add_argument('--device', type=str, default='cuda:0', help='device')
     parser.add_argument('--batch_size', type=int, default=128, help='batch size')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='init learning rate')
     parser.add_argument('--epochs', type=int, default=100, help='num of training epochs')
@@ -260,9 +279,10 @@ if __name__ == "__main__":
     parser.add_argument('--use_201_to_test', action=argparse.BooleanOptionalAction)
     parser.add_argument('--use_201_to_train', action=argparse.BooleanOptionalAction)
     parser.add_argument('--use_201_to_tune', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--use_301_to_test', action=argparse.BooleanOptionalAction)
     parser.add_argument('--model_path', type=str, default='/home/jingchl6/.local/TG-NAS/GNN_Evaluation_Result/checkpoint/checkpoint_finetune.pth.tar', help='location of the GNN model')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
-    parser.add_argument('--weight_decay', type=float, default=3e-5, help='weight decay')
+    # parser.add_argument('--weight_decay', type=float, default=3e-5, help='weight decay')
     parser.add_argument('--comment', type=str, default='', help='device')
     
     args = parser.parse_args()

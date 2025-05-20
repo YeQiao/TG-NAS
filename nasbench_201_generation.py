@@ -1,3 +1,14 @@
+import pkgutil
+if not hasattr(pkgutil, 'ImpImporter'):
+    pkgutil.ImpImporter = pkgutil.zipimporter
+
+import importlib.machinery
+if not hasattr(importlib.machinery.FileFinder, 'find_module'):
+    # Patch FileFinder to provide a find_module method that uses find_spec.
+    def find_module(self, fullname):
+        spec = self.find_spec(fullname)
+        return spec.loader if spec is not None else None
+    importlib.machinery.FileFinder.find_module = find_module
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
@@ -240,7 +251,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--select', action=argparse.BooleanOptionalAction)
     parser.add_argument('--onehot', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--sentence_length', type=str, default="short")
+    parser.add_argument('--sentence_length', type=str, default="long")
     parser.add_argument('--model_path', type=str, default='sentence-transformers/all-MiniLM-L6-v2', help='sentence transformer model to use')
     # parser.add_argument('--model_path', type=str, default="/home/jingchl6/.local/sentencedata/fine_tuned_sentence_transformer", help='sentence transformer model to use')
     parser.add_argument('--comment', type=str, default='', help='optional comment')

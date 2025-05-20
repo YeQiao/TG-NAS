@@ -1,3 +1,14 @@
+import pkgutil
+if not hasattr(pkgutil, 'ImpImporter'):
+    pkgutil.ImpImporter = pkgutil.zipimporter
+
+import importlib.machinery
+if not hasattr(importlib.machinery.FileFinder, 'find_module'):
+    # Patch FileFinder to provide a find_module method that uses find_spec.
+    def find_module(self, fullname):
+        spec = self.find_spec(fullname)
+        return spec.loader if spec is not None else None
+    importlib.machinery.FileFinder.find_module = find_module
 from sklearn.preprocessing import MinMaxScaler
 import torch
 import numpy as np
@@ -52,7 +63,7 @@ def validate(args, model):
 
         scaler = MinMaxScaler(feature_range=(np.min(ground_truth), np.max(ground_truth)))
         normalized_arr = scaler.fit_transform(predicted.reshape(-1, 1)).flatten()
-        
+        #add one column without normalization
         combined = np.column_stack((ground_truth, normalized_arr))
         print("combined dimension:", combined.shape)
         np.savetxt('test'+'_'+args.comment+'.txt', combined, fmt='%.4f')
@@ -73,18 +84,18 @@ def main(args):
         nfeat=args.embedding_size + 1, # need some think ?
         ifsigmoid=False
     )
-    gcn.load_state_dict(torch.load(args.model_path, map_location=torch.device(args.device))['state_dict']) 
+    gcn.load_state_dict(torch.load(args.model_path, map_location=torch.device(args.device), weights_only=False)['state_dict']) 
     gcn = gcn.to(args.device)
     validate(args, gcn)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path_101', type=str, default='/home/yeq6/Research_project/MicroNAS/nasbench_101_dataset.pkl', help='location of the 101 data')
-    parser.add_argument('--data_path_201', type=str, default='/home/yeq6/Research_project/MicroNAS/nasbench_201_dataset_selected_1.pkl', help='location of the 201 data')
+    parser.add_argument('--data_path_101', type=str, default='/home/jingchl6/.local/TG-NAS/nasbench_101_dataset_sentence.pkl', help='location of the 101 data')
+    parser.add_argument('--data_path_201', type=str, default='/home/jingchl6/.local/TG-NAS/nasbench_201_dataset_all_sentence_transformer_nofinetune.pkl', help='location of the 201 data')
     parser.add_argument('--device', type=str, default='cuda', help='device')
-    parser.add_argument('--model_path', type=str, default='/home/yeq6/Research_project/MicroNAS/GNN_Evaluation_Result/checkpoint/checkpoint.pth.tar', help='location of the GNN model')
+    parser.add_argument('--model_path', type=str, default='/home/jingchl6/.local/TG-NAS/new_gnn_result/GNN_Evaluation_Result_gchl6/.local/TG-NAS/nasbench_101_dataset_sentence_384_use201_test/checkpoint128_0.001100_testoriginal/checkpoint.pth.tar', help='location of the GNN model')
     parser.add_argument('--batch_size', type=int, default=128, help='batch size')
-    parser.add_argument('--embedding_size', type=int, default=768, help='embedding size')
+    parser.add_argument('--embedding_size', type=int, default=384, help='embedding size')
     parser.add_argument('--comment', type=str, default='', help='comment')
     parser.add_argument('--test_201', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()

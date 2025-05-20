@@ -50,25 +50,25 @@ def ops_embedding(args):
     model = SentenceTransformer(args.embedding_model)
     print('embedding model loaded')
     # Our sentences we like to encode
-    sentences = ['Input',
+    sentences = ['Input operator',
                 
-                'None',
+                'A none operator that does nothing',
 
-                'Residual connection',
+                'A residual connection operator that adds identity mapping to the next layer',
                 
-                'depth-wise separable convolution 3x3',
+                "A depthwise separable convolution is applied with a kernel size of 3 by 3",
 
-                'depth-wise separable convolution 5x5',
+                "A depthwise separable convolution is applied with a kernel size of 5 by 5",
                 
-                'dilated convolution 3x3',
+                "A dilated convolution is applied with a kernel size of 3 by 3",
 
-                'dilated convolution 5x5',
+                "A dilated convolution is applied with a kernel size of 5 by 5",
                 
-                'Average pooling 3x3',
+                'An average pooling operator with a kernel size 3 by 3',
 
-                'Max pooling 3x3',
+                'A max pooling operator with a kernel size 3 by 3',
 
-                'Output'
+                'Output operator'
                 ]
     embeddings = model.encode(sentences, device = 'cuda:0')
     return embeddings

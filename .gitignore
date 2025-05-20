@@ -123,3 +123,11 @@ scripts-search/l2s-algos
 TEMP-L.sh
 
 .nfs00*
+
+*.npy
+*.txt
+*.png
+*.pdf
+*.pkl
+new_gnn_result/
+*.svg
